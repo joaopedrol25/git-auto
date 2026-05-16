@@ -9,7 +9,7 @@ check_api_key() {
 }
 
 check_staged_changes() {
-  DIFF_CONTENT=$(git diff --cached)
+  DIFF_CONTENT=$(git diff --cached | head -n 300)
 
   if [ -z "$DIFF_CONTENT" ]; then
     echo "No staged changes found."
@@ -35,19 +35,21 @@ check_staged_changes() {
 
 get_ai_message() {
   local API_KEY="$API_KEY_AI"
-  local URL="https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent"
+  local URL="https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent"
 
   echo "Asking AI for a commit message..."
 
+  export DIFF_CONTENT
+
+  local HEADER
   local JSON_PAYLOAD
-  JSON_PAYLOAD=$(jq -n --arg diff "$DIFF_CONTENT" \
-    --arg prompt "Write a short, professional git commit message for these changes. Use English. Return ONLY the raw commit message text in one line using a prefix that categorizes the nature of changes, like feat, fix, docs, style, refactor, perf, test, chore, build, ci, or revert, followed by a colon and the message itself. Example: feat: add user authentication module" \
+  JSON_PAYLOAD=$(jq -n --arg prompt "Write a short, professional git commit message for these changes. Use English. Return ONLY the raw commit message text in one line using a prefix that categorizes the nature of changes, like feat, fix, docs, style, refactor, perf, test, chore, build, ci, or revert, followed by a colon and the message itself. Example: feat: add user authentication module" \
     '{
       contents: [
         {
           parts: [
             {
-              text: ($prompt + "\n\n" + $diff)
+              text: ($prompt + "\n\n" + env.DIFF_CONTENT)
             }
           ]
         }
