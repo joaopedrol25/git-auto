@@ -9,23 +9,24 @@ check_api_key() {
 }
 
 check_staged_changes() {
-    DIFF_CONTENT=$(git diff --cached)
+  DIFF_CONTENT=$(git diff --cached)
 
-    if [ -z "$DIFF_CONTENT" ]; then
-      echo "No staged changes found."
-      echo ""
-      read -rp "Do you wanna try a push?[Y/n]: " push_choice
-      case "${push_choice,,}" in
-        y) push_to_remote
-          ;;
-        n) exit 0
-          ;;
-        *) echo "Invalid choice. Exiting."; exit 1
-          ;;
-      esac
-    fi
-
-  echo "Staged changes detected."
+  if [ -z "$DIFF_CONTENT" ]; then
+    echo "No staged changes found."
+    echo ""
+    read -rp "Do you wanna try a push?[Y/n]: " push_choice
+    case "${push_choice,,}" in
+      y) push_to_remote
+        ;;
+      n) exit 0
+        ;;
+      *) echo "Invalid choice. Exiting."; exit 1
+        ;;
+    esac
+  else
+   echo "Staged changes detected."
+   get_ai_message
+  fi
 }
 
 get_ai_message() {
@@ -69,6 +70,12 @@ get_ai_message() {
   COMMIT_MESSAGE=$(echo "$RESPONSE" | jq -r '.candidates[0].content.parts[0].text // empty' 2>/dev/null)
   COMMIT_MESSAGE=$(echo "$COMMIT_MESSAGE" | tr -d '\"' | tr -d '`' | sed '/^$/d' | head -n 1)
 
+  if [ -z "$COMMIT_MESSAGE" ] || [ "$COMMIT_MESSAGE" == "null" ]; then
+    echo "AI returned an empty or invalid response."
+    echo "Raw response:"
+    echo "$RESPONSE" | jq . 2>/dev/null || echo "$RESPONSE"
+    exit 1
+  fi
 }
 
 do_commit() {
@@ -111,6 +118,7 @@ push_to_remote() {
         else
           echo "Push failed. You can retry with:"
           echo "  git push $REMOTE $CURRENT_BRANCH"
+          echo "  git push $REMOTE $CURRENT_BRANCH --force (if you know what you are doing)" 
           exit 1
         fi
         ;;
@@ -127,6 +135,5 @@ push_to_remote() {
 
 check_api_key
 check_staged_changes
-get_ai_message
 do_commit
 push_to_remote
