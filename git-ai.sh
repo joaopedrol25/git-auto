@@ -2,7 +2,7 @@
 
 check_api_key() {
   if [ -z "${API_KEY_AI:-}" ]; then
-    err "API_KEY_AI environment variable is not set."
+    echo "API_KEY_AI environment variable is not set."
     echo "Export it first: export API_KEY_AI=\"your-key-here\""
     exit 1
   fi
@@ -16,16 +16,20 @@ check_staged_changes() {
     echo ""
     read -rp "Do you wanna try a push?[Y/n]: " push_choice
     case "${push_choice,,}" in
-      y) push_to_remote
-        ;;
-      n) exit 0
-        ;;
-      *) echo "Invalid choice. Exiting."; exit 1
-        ;;
+    y)
+      push_to_remote
+      ;;
+    n)
+      exit 0
+      ;;
+    *)
+      echo "Invalid choice. Exiting."
+      exit 1
+      ;;
     esac
   else
-   echo "Staged changes detected."
-   get_ai_message
+    echo "Staged changes detected."
+    get_ai_message
   fi
 }
 
@@ -52,10 +56,10 @@ get_ai_message() {
 
   local RESPONSE
   RESPONSE=$(curl -s -w "\n%{http_code}" "$URL" \
-      -H "x-goog-api-key: $API_KEY" \
-      -H "Content-Type: application/json" \
-      -X POST \
-      -d "$JSON_PAYLOAD")
+    -H "x-goog-api-key: $API_KEY" \
+    -H "Content-Type: application/json" \
+    -X POST \
+    -d "$JSON_PAYLOAD")
 
   local HTTP_CODE
   HTTP_CODE=$(echo "$RESPONSE" | tail -n 1)
@@ -76,6 +80,7 @@ get_ai_message() {
     echo "$RESPONSE" | jq . 2>/dev/null || echo "$RESPONSE"
     exit 1
   fi
+  do_commit
 }
 
 do_commit() {
@@ -86,23 +91,24 @@ do_commit() {
   echo ""
   read -rp "Accept this message? [Y/n/e(dit)]:" choice
   case "${choice,,}" in
-    n)
-      echo "Commit aborted."
-      exit 0
-      ;;
-    e)
-      read -rp "Enter your commit message: " COMMIT_MESSAGE
-      if [ -z "$COMMIT_MESSAGE" ]; then
-        echo "Empty message. Aborting."
-        exit 1
-      fi
-      ;;
-    *)
-      echo ""
-      ;;
+  n)
+    echo "Commit aborted."
+    exit 0
+    ;;
+  e)
+    read -rp "Enter your commit message: " COMMIT_MESSAGE
+    if [ -z "$COMMIT_MESSAGE" ]; then
+      echo "Empty message. Aborting."
+      exit 1
+    fi
+    ;;
+  *)
+    echo ""
+    ;;
   esac
   git commit -m "$COMMIT_MESSAGE"
   echo "Committed successfully!"
+  push_to_remote
 }
 
 get_current_branch() {
@@ -127,21 +133,21 @@ push_to_remote() {
     read -rp "Push to ${REMOTE}/${CURRENT_BRANCH}? [Y/n]: " push_choice
     echo ""
     case "${push_choice,,}" in
-      n)
-        echo "Push skipped. Your commit is saved locally."
+    n)
+      echo "Push skipped. Your commit is saved locally."
+      exit 0
+      ;;
+    *)
+      echo "Pushing to ${REMOTE}/${CURRENT_BRANCH}..."
+      if git push "$REMOTE" "$CURRENT_BRANCH"; then
         exit 0
-        ;;
-      *)
-        echo "Pushing to ${REMOTE}/${CURRENT_BRANCH}..."
-        if git push "$REMOTE" "$CURRENT_BRANCH"; then
-          exit 0
-        else
-          echo "Push failed. You can retry with:"
-          echo "  git push $REMOTE $CURRENT_BRANCH"
-          echo "  git push $REMOTE $CURRENT_BRANCH --force (if you know what you are doing)" 
-          exit 1
-        fi
-        ;;
+      else
+        echo "Push failed. You can retry with:"
+        echo "  git push $REMOTE $CURRENT_BRANCH"
+        echo "  git push $REMOTE $CURRENT_BRANCH --force (if you know what you are doing)"
+        exit 1
+      fi
+      ;;
     esac
   else
     echo ""
@@ -155,5 +161,4 @@ push_to_remote() {
 
 check_api_key
 check_staged_changes
-do_commit
-push_to_remote
+
