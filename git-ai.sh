@@ -79,10 +79,28 @@ get_ai_message() {
 }
 
 do_commit() {
-  echo ""
+  echo "--------------------------------------------"
   echo "Proposed commit message:"
-  echo ${COMMIT_MESSAGE}
+  echo "[${COMMIT_MESSAGE}]"
+  echo "--------------------------------------------"
   echo ""
+  read -rp "Accept this message? [Y/n/e(dit)]:" choice
+  case "${choice,,}" in
+    n)
+      echo "Commit aborted."
+      exit 0
+      ;;
+    e)
+      read -rp "Enter your commit message: " COMMIT_MESSAGE
+      if [ -z "$COMMIT_MESSAGE" ]; then
+        echo "Empty message. Aborting."
+        exit 1
+      fi
+      ;;
+    *)
+      echo ""
+      ;;
+  esac
   git commit -m "$COMMIT_MESSAGE"
   echo "Committed successfully!"
 }
@@ -105,11 +123,13 @@ push_to_remote() {
 
   if git remote | grep -q "^${REMOTE}$"; then
 
+    echo ""
     read -rp "Push to ${REMOTE}/${CURRENT_BRANCH}? [Y/n]: " push_choice
     echo ""
     case "${push_choice,,}" in
       n)
         echo "Push skipped. Your commit is saved locally."
+        exit 0
         ;;
       *)
         echo "Pushing to ${REMOTE}/${CURRENT_BRANCH}..."
