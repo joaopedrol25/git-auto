@@ -33,12 +33,14 @@ check_staged_changes() {
   if [ -z "$DIFF_CONTENT" ]; then
     echo "No staged changes found."
     echo ""
-    read -rp "Do you wanna try a push? [Y/n]: " push_choice
+    read -rp "  Do you want to try a push? [Y/n]: " push_choice
+    push_choice="${push_choice:-y}"
     case "${push_choice,,}" in
-    y | "")
+    y | yes)
       push_to_remote
       ;;
-    n)
+    n | no)
+      echo "Exiting. Nothing to do."
       exit 0
       ;;
     *)
@@ -101,25 +103,26 @@ get_ai_message() {
     echo "$RESPONSE" | jq . 2>/dev/null || echo "$RESPONSE"
     exit 1
   fi
+
   do_commit
 }
 
 do_commit() {
   echo "--------------------------------------------------------------"
-  echo "Proposed commit message:"
+  echo -e "Proposed commit message:"
   echo "[ ${COMMIT_MESSAGE} ]"
   echo "--------------------------------------------------------------"
   echo ""
-  read -rp "Accept this message? [Y/n/e(dit)]: " choice
+  read -rp "  Accept? [Y/n/e(dit)/r(etry)]: " choice
   choice="${choice:-y}"
 
   case "${choice,,}" in
-  n)
+  n | no)
     echo "Commit aborted."
     exit 0
     ;;
-  e)
-    read -rp "Enter your commit message: " COMMIT_MESSAGE
+  e | edit)
+    read -rp "  Enter your commit message: " COMMIT_MESSAGE
     if [ -z "$COMMIT_MESSAGE" ]; then
       echo "Empty message. Aborting."
       exit 1
@@ -129,6 +132,7 @@ do_commit() {
     echo ""
     ;;
   esac
+
   git commit -m "$COMMIT_MESSAGE"
   echo "Committed successfully!"
   push_to_remote
@@ -143,13 +147,14 @@ push_to_remote() {
     read -rp "Push to ${REMOTE}/${CURRENT_BRANCH}? [Y/n]: " push_choice
     echo ""
     case "${push_choice,,}" in
-    n)
+    n | no)
       echo "Push skipped. Your commit is saved locally."
       exit 0
       ;;
     *)
       echo "Pushing to ${REMOTE}/${CURRENT_BRANCH}..."
       if git push "$REMOTE" "$CURRENT_BRANCH"; then
+        echo "Push complete."
         exit 0
       else
         echo "Push failed. You can retry with:"
@@ -181,14 +186,18 @@ undo_last_commit() {
 
   echo "Analyzing your last commit..."
 
-  local LAST_COMMIT_HASH LAST_COMMIT_SUBJECT
+  local LAST_COMMIT_HASH LAST_COMMIT_SUBJECT LAST_COMMIT_AUTHOR LAST_COMMIT_DATE
   LAST_COMMIT_HASH=$(git rev-parse HEAD)
   LAST_COMMIT_SUBJECT=$(git log -1 --format="%s")
+  LAST_COMMIT_AUTHOR=$(git log -1 --format="%an")
+  LAST_COMMIT_DATE=$(git log -1 --format="%cr")
 
   echo "--------------------------------------------------------------"
-  echo "Last commit found:"
-  echo "  Hash   : ${LAST_COMMIT_HASH:0:7}"
-  echo "  Message: ${LAST_COMMIT_SUBJECT}"
+  echo "  Last commit found:"
+  echo "  Hash    : ${LAST_COMMIT_HASH:0:7}"
+  echo "  Message : ${LAST_COMMIT_SUBJECT}"
+  echo "  Author  : ${LAST_COMMIT_AUTHOR}"
+  echo "  When    : ${LAST_COMMIT_DATE}"
   echo "--------------------------------------------------------------"
 
   local IS_PUSHED
@@ -221,9 +230,11 @@ undo_last_commit() {
     1)
       echo "Reverting commit..."
       git revert --no-edit "$LAST_COMMIT_HASH" && git push "$REMOTE" "$CURRENT_BRANCH"
+      echo "Revert pushed successfully."
       ;;
     2)
-      read -rp "Are you absolutely sure you want to rewrite remote history? [y/N]: " confirm_force
+      echo "This will rewrite the remote history of ${REMOTE}/${CURRENT_BRANCH}."
+      read -rp "  Are you absolutely sure? [y/N]: " confirm_force
       if [[ "${confirm_force,,}" =~ ^(y|yes)$ ]]; then
         git reset --soft HEAD~1
         git push "$REMOTE" "$CURRENT_BRANCH" --force
@@ -244,24 +255,35 @@ case "${1:-}" in
 -u | --undo)
   undo_last_commit
   ;;
+-a | --stage-all)
+  echo "Staging all changes..."
+  git add -A
+  check_git_repository
+  check_api_key
+  check_staged_changes
+  ;;
 -h | --help)
-  echo "git-auto — AI-Powered Git Assistant"
+  echo "gitauto — AI-Powered Git Assistant"
   echo ""
   echo "Usage:"
-  echo "  git-auto              Run standard flow (Stage check → AI Commit → Push)"
-  echo "  git-auto -u, --undo   Undo or revert the very last commit safely"
-  echo "  git-auto -h, --help   Show this help menu"
+  echo "  gitauto [options]"
+  echo ""
+  echo "Options:"
+  echo "  gitauto              Run standard flow (Stage check → AI Commit → Push)"
+  echo "  gitauto -a, --stage-all   Stage all changes, then run standard flow"
+  echo "  gitauto -u, --undo        Undo or revert the very last commit safely"
+  echo "  gitauto -h, --help        Show this help menu"
   exit 0
   ;;
 "")
 
-check_git_repository
-check_api_key
-check_staged_changes
+  check_git_repository
+  check_api_key
+  check_staged_changes
   ;;
 *)
   echo "Unknown option: $1"
-  echo "Use 'git-auto --help' for usage."
+  echo "Use 'gitauto --help' for usage."
   exit 1
   ;;
 esac
