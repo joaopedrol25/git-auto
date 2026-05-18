@@ -256,9 +256,9 @@ case "${1:-}" in
   undo_last_commit
   ;;
 -a | --stage-all)
+  check_git_repository
   echo "Staging all changes..."
   git add -A
-  check_git_repository
   check_api_key
   check_staged_changes
   ;;
@@ -269,7 +269,7 @@ case "${1:-}" in
   echo "  gitauto [options]"
   echo ""
   echo "Options:"
-  echo "  gitauto              Run standard flow (Stage check → AI Commit → Push)"
+  echo "  gitauto                   Run standard flow (Stage check → AI Commit → Push)"
   echo "  gitauto -a, --stage-all   Stage all changes, then run standard flow"
   echo "  gitauto -u, --undo        Undo or revert the very last commit safely"
   echo "  gitauto -h, --help        Show this help menu"
