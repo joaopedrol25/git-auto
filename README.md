@@ -1,28 +1,32 @@
-# git-auto
+# gitauto
 
-> **AI-powered Git commit messages — generated automatically from your staged diff.**
+> **AI-powered Git commits — stage, commit, and push with a single command.**
 
-`git-auto` is a Bash script that reads your staged Git changes, sends them to an AI model, and proposes a professional, conventional commit message. You review it, accept, edit, or reject — then it commits and pushes for you.
+`gitauto` is a Bash script that reads your staged Git changes, sends them to an AI model, and proposes a professional, conventional commit message. You review it, accept, edit, retry, or reject — then it commits and pushes for you.
 
 ---
 
-##  Features
+## Features
 
-- **AI-generated commit messages** using your staged diff as context
-- **Conventional Commits** format (`feat:`, `fix:`, `docs:`, `refactor:`, etc.)
-- **Interactive review** — accept, reject, or manually edit the proposed message
-- **Optional push** after committing, targeting the correct remote and branch automatically
-- **API key validation** before any network call
+- **AI-generated commit messages** built from your staged diff as context
+- **Conventional Commits** format (`feat:`, `fix:`, `docs:`, `refactor:`, `chore:`, etc.)
+- **Interactive review** — accept, edit, retry with a new AI suggestion, or abort
+- **Safe undo** — undo or revert the last commit with built-in safety checks
+- **Stage-all shortcut** — stage everything and commit in one command
+- **Smart push** — detects the current branch and remote automatically
+- **API key validation** before any network call is made
 
 ---
 
 ## Requirements
 
-- `bash` (v4+)
-- `git`
-- `curl`
-- `jq`
-- An AI API key (see [Choosing an AI Provider](#-choosing-an-ai-provider))
+| Tool | Purpose |
+|------|---------|
+| `bash` (v4+) | Runtime |
+| `git` | Version control |
+| `curl` | API requests |
+| `jq` | JSON parsing |
+| An AI API key | Commit message generation |
 
 Install missing tools on Debian/Ubuntu:
 
@@ -32,75 +36,214 @@ sudo apt install git curl jq
 
 ---
 
-## Choosing an AI Provider
+## Installation
 
-The script requires an AI API key exported as the `API_KEY_AI` environment variable. **You can use any provider** — just swap the API endpoint and authentication header inside `get_ai_message()` in `git-ai.sh`.
+### 1. Clone the repository
 
-The script currently ships pre-configured for **Google Gemini**.
+```bash
+git clone https://github.com/joaopedrol25/git-auto.git
+cd git-auto
+```
+
+### 2. Make the script executable
+
+```bash
+chmod +x git-ai.sh
+```
+
+### 3. Install globally
+
+```bash
+sudo cp git-ai.sh /usr/local/bin/gitauto
+```
+
+Now you can call `gitauto` from any Git repository on your system.
 
 ---
 
-## Using Google Gemini (default)
+## API Key Setup
 
-### 1. Get your Gemini API key
+The script requires an AI API key exported as `API_KEY_AI`. It ships pre-configured for **Google Gemini**.
+
+### Getting a Gemini API key
 
 1. Go to [Google AI Studio](https://aistudio.google.com/app/apikey)
 2. Sign in with your Google account
 3. Click **"Create API key"**
 4. Copy the generated key
 
-### 2. Export the key in your shell
+### Exporting the key
 
 ```bash
 export API_KEY_AI="your-gemini-api-key-here"
 ```
 
-To make this permanent, add it to your shell config file:
+To make this permanent, add it to your shell config:
 
 ```bash
 # ~/.bashrc or ~/.zshrc
 export API_KEY_AI="your-gemini-api-key-here"
 ```
 
-Then reload it:
+Then reload:
 
 ```bash
 source ~/.bashrc   # or source ~/.zshrc
 ```
 
-### 3. How the script calls Gemini
+---
 
-The script hits the Gemini **`generateContent`** REST endpoint:
+## Usage
 
 ```
-POST https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent
+gitauto              Run standard flow (Stage check → AI Commit → Push)
+gitauto -a           Stage all changes, then run standard flow
+gitauto -u           Undo or revert the very last commit safely
+gitauto -h           Show the help menu
 ```
 
-Authentication is done via the `x-goog-api-key` HTTP header (not a Bearer token):
+### Standard workflow
 
 ```bash
-curl -s "$URL" \
-  -H "x-goog-api-key: $API_KEY" \
-  -H "Content-Type: application/json" \
-  -X POST \
-  -d "$JSON_PAYLOAD"
+# Stage your changes as usual
+git add .
+
+# Let AI do the rest
+gitauto
 ```
 
-The model in use is configurable inside `git-ai.sh` — look for the `URL` variable inside `get_ai_message()`:
+### Stage everything in one shot
 
 ```bash
-local URL="https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview:generateContent"
+gitauto -a   # or gitauto --stage-all
+# Equivalent to: git add -A && gitauto
 ```
 
-To switch to a different Gemini model (e.g. `gemini-1.5-pro`), just replace the model slug in that URL.
+---
 
-> **Available Gemini models:** [Google AI — Models overview](https://ai.google.dev/gemini-api/docs/models/gemini)
+## Interactive Prompts
+
+### Commit message review
+
+```
+--------------------------------------------------------------
+Proposed commit message:
+[ feat: add user authentication module ]
+--------------------------------------------------------------
+
+  Accept? [Y/n/e(dit)/r(etry)]:
+```
+
+| Input | Behaviour |
+|-------|-----------|
+| `Y` or Enter | Commit with the proposed message |
+| `n` | Abort — nothing is committed |
+| `e` | Type your own message, then commit |
+| `r` | Ask the AI for a new suggestion |
+
+### Push prompt
+
+```
+  Push to origin/main? [Y/n]:
+```
+
+| Input | Behaviour |
+|-------|-----------|
+| `Y` or Enter | Push to the detected remote and branch |
+| `n` | Skip push — commit is saved locally |
+
+### No staged changes
+
+If nothing is staged, `gitauto` skips the AI and asks if you want to push directly:
+
+```
+No staged changes found.
+
+  Do you want to try a push? [Y/n]:
+```
+
+---
+
+## Undo Last Commit (`-u`)
+
+```bash
+gitauto --undo
+```
+
+`gitauto` inspects your last commit and handles it differently based on whether it has been pushed:
+
+### Local-only commit
+
+```
+Last commit found:
+  Hash   : a1b2c3d
+  Message: feat: add login page
+  Author : Unknown Author
+  When   : 2 minutes ago
+
+This commit is strictly LOCAL (not pushed yet).
+Undo this commit and keep changes staged? [Y/n]:
+```
+
+A `git reset --soft HEAD~1` is run — your changes go back to the staging area.
+
+### Already-pushed commit
+
+```
+ WARNING: This commit has ALREADY been pushed to origin/main.
+
+Options:
+  1) Revert — Create a new commit that rolls back the changes (Safest)
+  2) Force  — Delete locally and force-push (Dangerous — solo repos only)
+  3) Cancel
+```
+
+| Option | What it does |
+|--------|-------------|
+| `1` | `git revert` + push — safe for shared repos |
+| `2` | `git reset --soft` + `git push --force` — rewrites history |
+| `3` | Do nothing |
+
+---
+
+## How It Works
+
+```
+git diff --cached
+       │
+       ▼
+  AI API (Gemini)
+       │
+       ▼
+  Proposed commit message
+       │
+       ▼
+  User reviews  ──→  retry / edit / abort
+       │
+       ▼
+  git commit -m "..."
+       │
+       ▼
+  git push origin <branch>
+```
+
+| Function | Responsibility |
+|----------|---------------|
+| `check_git_repository` | Validates you're inside a Git repo |
+| `check_api_key` | Ensures `API_KEY_AI` is set |
+| `get_current_branch` | Detects the active branch |
+| `get_current_remote` | Detects the configured remote |
+| `check_staged_changes` | Reads the diff; routes to AI or push-only |
+| `get_ai_message` | Builds the JSON payload, calls the API, parses the response |
+| `do_commit` | Shows the message and handles accept / edit / retry / abort |
+| `push_to_remote` | Optionally pushes after a successful commit |
+| `undo_last_commit` | Safely undoes or reverts the last commit |
 
 ---
 
 ## Switching to Another AI Provider
 
-You can adapt the script to any OpenAI-compatible or custom REST API. The only function you need to modify is `get_ai_message()`.
+You can adapt `gitauto` to any REST-based AI API. The only function you need to modify is `get_ai_message()` inside `git-ai.sh`.
 
 ### Example: OpenAI (ChatGPT)
 
@@ -130,120 +273,10 @@ get_ai_message() {
 
 ---
 
-## Installation
-
-### 1. Clone or download the script
-
-```bash
-git clone https://github.com/joaopedrol25/git-auto.git
-cd git-auto
-```
-
-### 2. Make the script executable
-
-```bash
-chmod +x git-ai.sh
-```
-
-### 3. Install globally (optional but recommended)
-
-```bash
-sudo cp git-ai.sh /usr/local/bin/git-auto
-```
-
-Now you can call `git-auto` from any Git repository.
-
----
-
-## Usage
-
-### Basic workflow
-
-```bash
-# 1. Stage your changes as usual
-git add .
-
-# 2. Run git-auto
-git-auto
-```
-
-### What happens next
-
-```
-Staged changes detected.
-Asking AI for a commit message...
---------------------------------------------
-Proposed commit message:
-[feat: add user authentication module]
---------------------------------------------
-
-Accept this message? [Y/n/e(dit)]:
-```
-
-| Input | Behaviour |
-|-------|-----------|
-| `Y` (or Enter) | Commit with the proposed message |
-| `n` | Abort — nothing is committed |
-| `e` | Prompt you to type your own message, then commit |
-
-After committing:
-
-```
-Committed successfully!
-
-Push to origin/main? [Y/n]:
-```
-
-| Input | Behaviour |
-|-------|-----------|
-| `Y` (or Enter) | Push to the detected remote and branch |
-| `n` | Skip push — commit is saved locally |
-
-### No staged changes
-
-If you run `git-auto` with nothing staged, it skips AI and asks if you want to push directly:
-
-```
-No staged changes found.
-
-Do you wanna try a push?[Y/n]:
-```
-
----
-
-## How It Works
-
-```
-git diff --cached
-       │
-       ▼
-  AI API (Gemini / OpenAI / other)
-       │
-       ▼
-  Proposed commit message
-       │
-       ▼
-  User reviews (accept / edit / reject)
-       │
-       ▼
-  git commit -m "..."
-       │
-       ▼
-  git push origin <branch>
-```
-
-1. **`check_api_key`** — ensures `API_KEY_AI` is set before doing anything.
-2. **`check_staged_changes`** — runs `git diff --cached`; if empty, jumps to push.
-3. **`get_ai_message`** — builds a JSON payload with the diff + prompt, calls the API, and parses the response.
-4. **`do_commit`** — shows the proposed message and lets you accept, edit, or abort.
-5. **`push_to_remote`** — detects the current branch and remote, then optionally pushes.
-
----
-
 ## Security Notes
 
-- Your API key is **never** logged or committed — it lives only in your shell environment.
-- The staged diff is sent to the AI provider's servers. Avoid running this on diffs containing secrets or sensitive credentials.
+- Your API key is **never** logged, committed, or stored by the script — it lives only in your shell environment.
+- The staged diff is sent to the AI provider's servers. Avoid using `gitauto` on diffs that contain secrets or sensitive credentials.
 
 ---
 
@@ -255,4 +288,4 @@ MIT — do whatever you want with it.
 
 ## Contributing
 
-PRs and issues are welcome. If you add support for a new AI provider, feel free to open a PR with an example snippet in this README.
+PRs and issues are welcome. If you add support for a new AI provider or a new flag, feel free to open a PR with the relevant changes and a snippet in this README.

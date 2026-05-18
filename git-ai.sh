@@ -1,5 +1,12 @@
 #!/bin/bash
 
+check_git_repository() {
+  if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    echo "Error: This directory is not a git repository."
+    exit 1
+  fi
+}
+
 check_api_key() {
   if [ -z "${API_KEY_AI:-}" ]; then
     echo "API_KEY_AI environment variable is not set."
@@ -8,18 +15,32 @@ check_api_key() {
   fi
 }
 
+get_current_branch() {
+  CURRENT_BRANCH=$(git branch --show-current 2>/dev/null)
+  if [ -z "$CURRENT_BRANCH" ]; then
+    CURRENT_BRANCH=$(git config --get init.defaultBranch 2>/dev/null || echo "main")
+  fi
+}
+
+get_current_remote() {
+  REMOTE=$(git config --get branch."$CURRENT_BRANCH".remote 2>/dev/null || true)
+  [ -z "$REMOTE" ] && REMOTE="origin"
+}
+
 check_staged_changes() {
   DIFF_CONTENT=$(git diff --cached | head -n 300)
 
   if [ -z "$DIFF_CONTENT" ]; then
     echo "No staged changes found."
     echo ""
-    read -rp "Do you wanna try a push?[Y/n]: " push_choice
+    read -rp "  Do you want to try a push? [Y/n]: " push_choice
+    push_choice="${push_choice:-y}"
     case "${push_choice,,}" in
-    y)
+    y | yes)
       push_to_remote
       ;;
-    n)
+    n | no)
+      echo "Exiting. Nothing to do."
       exit 0
       ;;
     *)
@@ -68,7 +89,7 @@ get_ai_message() {
   RESPONSE=$(echo "$RESPONSE" | sed '$d')
 
   if [ "$HTTP_CODE" -ne 200 ]; then
-    err "API request failed (HTTP $HTTP_CODE)."
+    echo "API request failed (HTTP $HTTP_CODE)."
     echo "$RESPONSE" | jq -r '.error.message // .' 2>/dev/null || echo "$RESPONSE"
     exit 1
   fi
@@ -82,23 +103,26 @@ get_ai_message() {
     echo "$RESPONSE" | jq . 2>/dev/null || echo "$RESPONSE"
     exit 1
   fi
+
   do_commit
 }
 
 do_commit() {
-  echo "--------------------------------------------"
-  echo "Proposed commit message:"
-  echo "[${COMMIT_MESSAGE}]"
-  echo "--------------------------------------------"
+  echo "--------------------------------------------------------------"
+  echo -e "Proposed commit message:"
+  echo "[ ${COMMIT_MESSAGE} ]"
+  echo "--------------------------------------------------------------"
   echo ""
-  read -rp "Accept this message? [Y/n/e(dit)]:" choice
+  read -rp "  Accept? [Y/n/e(dit)/r(etry)]: " choice
+  choice="${choice:-y}"
+
   case "${choice,,}" in
-  n)
+  n | no)
     echo "Commit aborted."
     exit 0
     ;;
-  e)
-    read -rp "Enter your commit message: " COMMIT_MESSAGE
+  e | edit)
+    read -rp "  Enter your commit message: " COMMIT_MESSAGE
     if [ -z "$COMMIT_MESSAGE" ]; then
       echo "Empty message. Aborting."
       exit 1
@@ -108,21 +132,10 @@ do_commit() {
     echo ""
     ;;
   esac
+
   git commit -m "$COMMIT_MESSAGE"
   echo "Committed successfully!"
   push_to_remote
-}
-
-get_current_branch() {
-  CURRENT_BRANCH=$(git branch --show-current 2>/dev/null)
-  if [ -z "$CURRENT_BRANCH" ]; then
-    CURRENT_BRANCH=$(git config --get init.defaultBranch 2>/dev/null || echo "main")
-  fi
-}
-
-get_current_remote() {
-  REMOTE=$(git config --get branch."$CURRENT_BRANCH".remote 2>/dev/null || true)
-  [ -z "$REMOTE" ] && REMOTE="origin"
 }
 
 push_to_remote() {
@@ -130,23 +143,23 @@ push_to_remote() {
   get_current_remote
 
   if git remote | grep -q "^${REMOTE}$"; then
-
     echo ""
     read -rp "Push to ${REMOTE}/${CURRENT_BRANCH}? [Y/n]: " push_choice
     echo ""
     case "${push_choice,,}" in
-    n)
+    n | no)
       echo "Push skipped. Your commit is saved locally."
       exit 0
       ;;
     *)
       echo "Pushing to ${REMOTE}/${CURRENT_BRANCH}..."
       if git push "$REMOTE" "$CURRENT_BRANCH"; then
+        echo "Push complete."
         exit 0
       else
         echo "Push failed. You can retry with:"
         echo "  git push $REMOTE $CURRENT_BRANCH"
-        echo "  git push $REMOTE $CURRENT_BRANCH --force (if you know what you are doing)"
+        echo "  git push $REMOTE $CURRENT_BRANCH --force  (if you know what you are doing)"
         exit 1
       fi
       ;;
@@ -155,12 +168,122 @@ push_to_remote() {
     echo ""
     echo "Remote '$REMOTE' not configured. Skipping push."
     echo "Commit saved locally. To push later, link your repo:"
-    echo "    git remote add origin <url>"
-    echo "    git push -u origin $CURRENT_BRANCH"
+    echo "  git remote add origin <url>"
+    echo "  git push -u origin $CURRENT_BRANCH"
     exit 1
   fi
 }
 
-check_api_key
-check_staged_changes
+undo_last_commit() {
+  check_git_repository
+  get_current_branch
+  get_current_remote
 
+  if ! git rev-parse HEAD >/dev/null 2>&1; then
+    echo "No commits found in this branch to undo."
+    exit 0
+  fi
+
+  echo "Analyzing your last commit..."
+
+  local LAST_COMMIT_HASH LAST_COMMIT_SUBJECT LAST_COMMIT_AUTHOR LAST_COMMIT_DATE
+  LAST_COMMIT_HASH=$(git rev-parse HEAD)
+  LAST_COMMIT_SUBJECT=$(git log -1 --format="%s")
+  LAST_COMMIT_AUTHOR=$(git log -1 --format="%an")
+  LAST_COMMIT_DATE=$(git log -1 --format="%cr")
+
+  echo "--------------------------------------------------------------"
+  echo "  Last commit found:"
+  echo "  Hash    : ${LAST_COMMIT_HASH:0:7}"
+  echo "  Message : ${LAST_COMMIT_SUBJECT}"
+  echo "  Author  : ${LAST_COMMIT_AUTHOR}"
+  echo "  When    : ${LAST_COMMIT_DATE}"
+  echo "--------------------------------------------------------------"
+
+  local IS_PUSHED
+  IS_PUSHED=$(git branch -r --contains "$LAST_COMMIT_HASH" 2>/dev/null \
+    | grep -q "${REMOTE}/${CURRENT_BRANCH}" && echo "yes" || echo "no")
+
+  if [ "$IS_PUSHED" = "no" ]; then
+    echo "This commit is strictly LOCAL (not pushed yet)."
+    read -rp "Undo this commit and keep changes staged? [Y/n]: " undo_choice
+    undo_choice="${undo_choice:-y}"
+
+    if [[ "${undo_choice,,}" =~ ^(y|yes)$ ]]; then
+      git reset --soft HEAD~1
+      echo "Success! Commit undone. Your changes are back in the staging area."
+    else
+      echo "Operation canceled."
+    fi
+
+  else
+    echo "WARNING: This commit has ALREADY been pushed to ${REMOTE}/${CURRENT_BRANCH}."
+    echo "Undoing it locally and force-pushing can break things for other contributors."
+    echo ""
+    echo "Options:"
+    echo "  1) Revert  — Create a new commit that rolls back the changes (Safest)"
+    echo "  2) Force   — Delete locally and force-push (Dangerous — use only if working alone)"
+    echo "  3) Cancel"
+    read -rp "Choose an option [1-3]: " remote_choice
+
+    case "$remote_choice" in
+    1)
+      echo "Reverting commit..."
+      git revert --no-edit "$LAST_COMMIT_HASH" && git push "$REMOTE" "$CURRENT_BRANCH"
+      echo "Revert pushed successfully."
+      ;;
+    2)
+      echo "This will rewrite the remote history of ${REMOTE}/${CURRENT_BRANCH}."
+      read -rp "  Are you absolutely sure? [y/N]: " confirm_force
+      if [[ "${confirm_force,,}" =~ ^(y|yes)$ ]]; then
+        git reset --soft HEAD~1
+        git push "$REMOTE" "$CURRENT_BRANCH" --force
+        echo "History rewritten successfully."
+      else
+        echo "Operation canceled."
+      fi
+      ;;
+    *)
+      echo "Operation canceled."
+      exit 0
+      ;;
+    esac
+  fi
+}
+
+case "${1:-}" in
+-u | --undo)
+  undo_last_commit
+  ;;
+-a | --stage-all)
+  check_git_repository
+  echo "Staging all changes..."
+  git add -A
+  check_api_key
+  check_staged_changes
+  ;;
+-h | --help)
+  echo "gitauto — AI-Powered Git Assistant"
+  echo ""
+  echo "Usage:"
+  echo "  gitauto [options]"
+  echo ""
+  echo "Options:"
+  echo "  gitauto                   Run standard flow (Stage check → AI Commit → Push)"
+  echo "  gitauto -a, --stage-all   Stage all changes, then run standard flow"
+  echo "  gitauto -u, --undo        Undo or revert the very last commit safely"
+  echo "  gitauto -h, --help        Show this help menu"
+  exit 0
+  ;;
+"")
+
+  check_git_repository
+  check_api_key
+  check_staged_changes
+  ;;
+*)
+  echo "Unknown option: $1"
+  echo "Use 'gitauto --help' for usage."
+  exit 1
+  ;;
+esac
